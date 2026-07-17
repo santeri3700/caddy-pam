@@ -1,0 +1,22 @@
+{
+	admin off
+	debug
+}
+
+http://:3001 {
+	forward_auth http://molpesrwebdev06:3000 {
+		uri /authenticate
+		header_up PAM-Allow "users=pleer groups=sudo"
+	}
+	root .
+	file_server browse
+}
+
+http://:3000 {
+	pam_auth {
+		base_url http://molpesrwebdev06:3000
+		cookie_secure false
+	}
+	root ./example
+	file_server
+}

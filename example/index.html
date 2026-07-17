@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAM Login</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            color: #fff;
+
+            background:
+                radial-gradient(circle at top left, #6366f1, transparent 35%),
+                radial-gradient(circle at bottom right, #06b6d4, transparent 35%),
+                linear-gradient(135deg, #020617, #111827);
+        }
+
+        body::before,
+        body::after {
+            content: "";
+            position: absolute;
+            width: 350px;
+            height: 350px;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: .45;
+            animation: float 10s infinite alternate ease-in-out;
+        }
+
+        body::before {
+            background: #6366f1;
+            top: -100px;
+            left: -100px;
+        }
+
+        body::after {
+            background: #22d3ee;
+            bottom: -100px;
+            right: -100px;
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            from {
+                transform: translateY(0);
+            }
+
+            to {
+                transform: translateY(40px);
+            }
+        }
+
+        .login-box {
+            position: relative;
+            z-index: 1;
+
+            width: 360px;
+            padding: 2.5rem;
+
+            background: rgba(255, 255, 255, .12);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 24px;
+
+            box-shadow:
+                0 25px 60px rgba(0,0,0,.35),
+                inset 0 1px 0 rgba(255,255,255,.2);
+        }
+
+        h1 {
+            margin: 0 0 .5rem;
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -.5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: rgba(255,255,255,.65);
+            margin-bottom: 2rem;
+            font-size: .95rem;
+        }
+
+        input {
+            width: 100%;
+            padding: .9rem 1rem;
+            margin-bottom: 1rem;
+
+            background: rgba(255,255,255,.12);
+            border: 1px solid rgba(255,255,255,.2);
+
+            color: white;
+            font-size: 1rem;
+
+            border-radius: 14px;
+            outline: none;
+
+            transition: .25s ease;
+        }
+
+        input::placeholder {
+            color: rgba(255,255,255,.55);
+        }
+
+        input:focus {
+            border-color: rgba(255,255,255,.7);
+            background: rgba(255,255,255,.18);
+            box-shadow: 0 0 0 4px rgba(99,102,241,.25);
+        }
+
+        button {
+            width: 100%;
+            height: 46px;
+
+            border: none;
+            border-radius: 14px;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #6366f1,
+                    #06b6d4
+                );
+
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+
+            cursor: pointer;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .6rem;
+
+            transition:
+                transform .2s ease,
+                box-shadow .2s ease,
+                opacity .2s ease;
+
+            box-shadow:
+                0 10px 25px rgba(6,182,212,.25);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow:
+                0 15px 35px rgba(6,182,212,.4);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: .7;
+        }
+
+        .spinner {
+            width: 17px;
+            height: 17px;
+
+            border:
+                2px solid rgba(255,255,255,.4);
+
+            border-top-color:white;
+
+            border-radius:50%;
+
+            animation: spin .8s linear infinite;
+
+            display:none;
+        }
+
+        button.loading .spinner {
+            display:inline-block;
+        }
+
+        button.loading .button-text {
+            opacity:.8;
+        }
+
+        @keyframes spin {
+            to {
+                transform:rotate(360deg);
+            }
+        }
+
+        .error {
+            margin-top:1rem;
+
+            padding:.75rem;
+
+            background:rgba(220,38,38,.15);
+            border:1px solid rgba(220,38,38,.3);
+
+            border-radius:12px;
+
+            color:#fecaca;
+
+            text-align:center;
+
+            display:none;
+
+            font-size:.9rem;
+        }
+    </style>
+</head>
+
+
+<body>
+
+<div class="login-box">
+
+    <h1>Welcome back</h1>
+    <div class="subtitle">
+        Sign in to continue
+    </div>
+
+    <form id="loginForm">
+
+        <input
+            id="username"
+            name="username"
+            type="text"
+            placeholder="Username"
+            autocomplete="username"
+            required
+        >
+
+        <input
+            id="password"
+            name="password"
+            type="password"
+            placeholder="Password"
+            autocomplete="current-password"
+            required
+        >
+
+        <button id="loginButton" type="submit">
+            <span class="spinner"></span>
+            <span class="button-text">
+                Sign in
+            </span>
+        </button>
+
+        <div id="error" class="error"></div>
+
+    </form>
+
+</div>
+
+
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = params.get("returnTo");
+
+    const form = document.getElementById("loginForm");
+    const errorBox = document.getElementById("error");
+    const loginButton = document.getElementById("loginButton");
+
+    let submitting = false;
+
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        if (submitting) {
+            return;
+        }
+
+        submitting = true;
+
+        loginButton.disabled = true;
+        loginButton.classList.add("loading");
+        errorBox.style.display = "none";
+
+
+        const username = document.getElementById("username").value;
+        const password = document.getElementById("password").value;
+
+
+        try {
+            const response = await fetch("/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: new URLSearchParams({
+                    username,
+                    password
+                })
+            });
+
+
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+
+
+            const token = await response.text();
+
+
+            if (!returnTo) {
+                throw new Error("Missing returnTo parameter");
+            }
+
+
+            const redirect = new URL(returnTo);
+            redirect.searchParams.set("token", token);
+
+            window.location.href = redirect.toString();
+
+        } catch (err) {
+
+            errorBox.textContent = err.message || "Login failed";
+            errorBox.style.display = "block";
+
+            submitting = false;
+            loginButton.disabled = false;
+            loginButton.classList.remove("loading");
+        }
+    });
+</script>
+
+</body>
+</html>
