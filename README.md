@@ -14,6 +14,8 @@ A PAM authentication plugin for [Caddy](https://caddyserver.com/) that provides 
 * 🍪 Secure session cookies with configurable lifetime
 * 🔑 Signed JWT session tokens
 * 🔌 Native Caddy `forward_auth` integration
+* 🚪 Logout endpoint for switching accounts
+* 📜 Structured login and authorization logs
 * 🐧 Uses existing system authentication configuration
 
 ## Requirements
@@ -129,12 +131,13 @@ The flow:
 2. Caddy calls `/authenticate`.
 3. The plugin checks the session cookie.
 4. If no valid session exists, the user is redirected to the authentication service.
+   If the session is valid but the `PAM-Allow` policy rejects the user, the redirect also carries a `denied=<username>` query parameter.
 5. The user submits credentials through the login page.
 6. Credentials are validated through PAM.
 7. A signed JWT session is issued.
 8. The original request continues.
 
-> **Note:** `caddy-pam` does not provide a built-in login page. The user-facing authentication UI is intentionally left to the operator. A minimal example login page is included in `examples/index.html` and can be used as a starting point or customized for your environment.
+> **Note:** `caddy-pam` does not provide a built-in login page. The user-facing authentication UI is intentionally left to the operator. A minimal example login page is included in `examples/index.html` and can be used as a starting point or customized for your environment. The example shows a permission warning, with a sign-out link, when the `denied` parameter is present.
 
 ## Access control
 
@@ -224,12 +227,20 @@ Used by `forward_auth`.
 Returns:
 
 * `200 OK` if the session is valid
-* Redirects to the authentication service if login is required
+* Redirects to the authentication service if login is required or the user is not authorized (the latter adds `denied=<username>`)
 
 When successful, it also adds:
 
 ```http
 x-pam-user: username
+```
+
+#### Logout
+
+The session cookie belongs to the protected site, so logout is requested on that site at `/cdn-cgi/pam-logout`. The request goes through `forward_auth`, which clears the session cookie and redirects to the login page. After signing in again the user is returned to `/`.
+
+```html
+<a href="/cdn-cgi/pam-logout">Sign out</a>
 ```
 
 ### `POST /login`
@@ -249,6 +260,24 @@ Response:
 
 ```text
 <signed JWT token>
+```
+
+## Logging
+
+The plugin logs through Caddy's logger, so entries go to stderr and from there to the systemd journal or container log driver:
+
+| Message                | Level | Fields                                      |
+| ---------------------- | ----- | ------------------------------------------- |
+| `pam login succeeded`  | info  | `user`, `client_ip`                         |
+| `pam login failed`     | warn  | `user`, `client_ip`, `error` (PAM code)     |
+| `authorization denied` | warn  | `user`, `client_ip`, `policy`, `uri`        |
+
+`client_ip` for login events honours Caddy's `trusted_proxies`. For `authorization denied` it comes from `X-Forwarded-For`.
+
+Example fail2ban setup reading the journal (`backend = systemd`, `journalmatch = _SYSTEMD_UNIT=caddy.service`):
+
+```ini
+failregex = "msg":"pam login failed".*"client_ip":"<ADDR>"
 ```
 
 ## Security notes

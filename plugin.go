@@ -22,11 +22,13 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/molpeDE/caddy-pam/pam"
+	"go.uber.org/zap"
 )
 
 type PAMPlugin struct {
 	echo            *echo.Echo
 	jwtKey          *ecdsa.PrivateKey
+	logger          *zap.Logger
 	BaseURL         string        `json:"baseURL,omitempty"`
 	SessionLifetime time.Duration `json:"sessionLifetime,omitempty"`
 	CookieHTTPOnly  bool          `json:"cookieHttpOnly,omitempty"`
@@ -43,6 +45,7 @@ const FALLTHROUGH_HANDLER_KEY string = "fallthroughHandler"
 const PAM_SESSION = "__PAM_Session"
 const PAM_RETURN = "__PAM_Return_URI"
 const CALLBACK_PATH = "/cdn-cgi/pam-callback"
+const LOGOUT_PATH = "/cdn-cgi/pam-logout"
 const SESSION_LIFETIME_DEFAULT = 60 * 60 * 12
 
 func init() {
@@ -145,6 +148,12 @@ func isAllowed(username string, policy string) bool {
 	return err == nil && len(Intersect(allowedGroups, groups)) > 0
 }
 
+// Caddy's client_ip honours trusted_proxies, unlike echo's spoofable RealIP.
+func clientIP(c echo.Context) string {
+	ip, _ := caddyhttp.GetVar(c.Request().Context(), caddyhttp.ClientIPVarKey).(string)
+	return ip
+}
+
 func (m *PAMPlugin) mkCookie(name string, value string, lifetime int) *http.Cookie {
 	return &http.Cookie{
 		Name:     name,
@@ -159,6 +168,8 @@ func (m *PAMPlugin) mkCookie(name string, value string, lifetime int) *http.Cook
 
 func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
+	m.logger = ctx.Logger()
+
 	e := echo.New()
 	e.HideBanner = true
 
@@ -168,12 +179,27 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 		headers := c.Request().Header
 
-		// authenticate here
+		// the session cookie lives on the protected site, so logout must be requested through it
+		if u, err := url.Parse(headers.Get("x-forwarded-uri")); err == nil && u.Path == LOGOUT_PATH {
+			c.SetCookie(m.mkCookie(PAM_SESSION, "", -1))
+			c.SetCookie(m.mkCookie(PAM_RETURN, "/", 300))
+			returnTo := fmt.Sprintf("%s://%s%s", headers.Get("x-forwarded-proto"), headers.Get("x-forwarded-host"), CALLBACK_PATH)
+			redirUrl, _ := url.Parse(m.BaseURL)
+			q := redirUrl.Query()
+			q.Add("returnTo", returnTo)
+			redirUrl.RawQuery = q.Encode()
+			return c.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
+		}
+
+		deniedUser := ""
 
 		if cookie, err := c.Cookie(PAM_SESSION); cookie != nil && err == nil {
-			if username, err := m.confirmJwt(cookie.Value); err == nil && isAllowed(username, headers.Get("PAM-Allow")) {
-				c.Response().Header().Add("x-pam-user", username)
-				return c.NoContent(http.StatusOK)
+			if username, err := m.confirmJwt(cookie.Value); err == nil {
+				if isAllowed(username, headers.Get("PAM-Allow")) {
+					c.Response().Header().Add("x-pam-user", username)
+					return c.NoContent(http.StatusOK)
+				}
+				deniedUser = username
 			}
 		}
 
@@ -202,6 +228,10 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 		q := redirUrl.Query()
 		orig.RawQuery = ""
 		q.Add("returnTo", returnTo)
+		if deniedUser != "" {
+			m.logger.Warn("authorization denied", zap.String("user", deniedUser), zap.String("client_ip", headers.Get("X-Forwarded-For")), zap.String("policy", headers.Get("PAM-Allow")), zap.String("uri", headers.Get("x-forwarded-uri")))
+			q.Add("denied", deniedUser)
+		}
 		redirUrl.RawQuery = q.Encode()
 
 		return c.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
@@ -220,7 +250,10 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 		ok, err := pam.Authenticate(req.Username, req.Password)
 
+		ip := clientIP(c)
+
 		if ok {
+			m.logger.Info("pam login succeeded", zap.String("user", req.Username), zap.String("client_ip", ip))
 
 			token, err := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 				"user": req.Username,
@@ -233,6 +266,7 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 			return c.String(http.StatusOK, token)
 		} else {
+			m.logger.Warn("pam login failed", zap.String("user", req.Username), zap.String("client_ip", ip), zap.Error(err))
 			return c.String(http.StatusUnauthorized, err.Error())
 		}
 	})

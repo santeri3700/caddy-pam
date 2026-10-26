@@ -202,6 +202,18 @@
             }
         }
 
+        .warning {
+            margin-bottom: 1rem;
+            padding: .75rem;
+            background: rgba(245,158,11,.15);
+            border: 1px solid rgba(245,158,11,.4);
+            border-radius: 12px;
+            color: #fde68a;
+            text-align: center;
+            display: none;
+            font-size: .9rem;
+        }
+
         .error {
             margin-top:1rem;
 
@@ -232,6 +244,8 @@
     <div class="subtitle">
         Sign in to continue
     </div>
+
+    <div id="denied" class="warning"></div>
 
     <form id="loginForm">
 
@@ -270,6 +284,22 @@
 <script>
     const params = new URLSearchParams(window.location.search);
     const returnTo = params.get("returnTo");
+
+    const deniedUser = params.get("denied");
+
+    if (deniedUser) {
+        const deniedBox = document.getElementById("denied");
+        deniedBox.textContent = `You are signed in as "${deniedUser}" but do not have permission to access this site. Sign in with a different account to continue.`;
+        deniedBox.style.display = "block";
+
+        if (returnTo) {
+            const logoutLink = document.createElement("a");
+            logoutLink.href = new URL("/cdn-cgi/pam-logout", returnTo).toString();
+            logoutLink.textContent = "Sign out";
+            logoutLink.style.cssText = "display:block;margin-top:.5rem;color:inherit;text-decoration:underline";
+            deniedBox.appendChild(logoutLink);
+        }
+    }
 
     const form = document.getElementById("loginForm");
     const errorBox = document.getElementById("error");
