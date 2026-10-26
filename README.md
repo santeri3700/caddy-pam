@@ -89,6 +89,7 @@ pam_auth {
     cookie_secure true
     cookie_httponly true
     cookie_samesite strict
+    show_detailed_pam_result false
 }
 ```
 
@@ -101,6 +102,7 @@ pam_auth {
 | `cookie_secure`    | `true`   | Enable the Secure cookie flag                  |
 | `cookie_httponly`  | `true`   | Enable HttpOnly cookies                        |
 | `cookie_samesite`  | `strict` | Cookie SameSite policy                         |
+| `show_detailed_pam_result` | `false`   | Return the PAM result name (e.g. `PAM_USER_UNKNOWN`) to the client instead of a generic `authentication failed`. Enabling it allows user enumeration |
 
 Supported SameSite values:
 
@@ -269,7 +271,7 @@ The plugin logs through Caddy's logger, so entries go to stderr and from there t
 | Message                | Level | Fields                                      |
 | ---------------------- | ----- | ------------------------------------------- |
 | `pam login succeeded`  | info  | `user`, `client_ip`                         |
-| `pam login failed`     | warn  | `user`, `client_ip`, `error` (PAM code)     |
+| `pam login failed`     | warn  | `user`, `client_ip`, `pam_result` (PAM code name, e.g. `PAM_AUTH_ERR`)     |
 | `authorization denied` | warn  | `user`, `client_ip`, `policy`, `uri`        |
 
 `client_ip` for login events honours Caddy's `trusted_proxies`. For `authorization denied` it comes from `X-Forwarded-For`.

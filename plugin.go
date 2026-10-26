@@ -26,14 +26,15 @@ import (
 )
 
 type PAMPlugin struct {
-	echo            *echo.Echo
-	jwtKey          *ecdsa.PrivateKey
-	logger          *zap.Logger
-	BaseURL         string        `json:"baseURL,omitempty"`
-	SessionLifetime time.Duration `json:"sessionLifetime,omitempty"`
-	CookieHTTPOnly  bool          `json:"cookieHttpOnly,omitempty"`
-	CookieSecure    bool          `json:"cookieSecure,omitempty"`
-	CookieSameSite  http.SameSite `json:"cookieSameSite,omitempty"`
+	echo                  *echo.Echo
+	jwtKey                *ecdsa.PrivateKey
+	logger                *zap.Logger
+	BaseURL               string        `json:"baseURL,omitempty"`
+	SessionLifetime       time.Duration `json:"sessionLifetime,omitempty"`
+	CookieHTTPOnly        bool          `json:"cookieHttpOnly,omitempty"`
+	CookieSecure          bool          `json:"cookieSecure,omitempty"`
+	CookieSameSite        http.SameSite `json:"cookieSameSite,omitempty"`
+	ShowDetailedPAMResult bool          `json:"showDetailedPamResult,omitempty"`
 }
 
 type LoginRequest struct {
@@ -266,8 +267,11 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 			return c.String(http.StatusOK, token)
 		} else {
-			m.logger.Warn("pam login failed", zap.String("user", req.Username), zap.String("client_ip", ip), zap.Error(err))
-			return c.String(http.StatusUnauthorized, err.Error())
+			m.logger.Warn("pam login failed", zap.String("user", req.Username), zap.String("client_ip", ip), zap.String("pam_result", err.Error()))
+			if m.ShowDetailedPAMResult {
+				return c.String(http.StatusUnauthorized, err.Error())
+			}
+			return c.String(http.StatusUnauthorized, "authentication failed")
 		}
 	})
 
@@ -324,6 +328,7 @@ func (m *PAMPlugin) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	m.CookieHTTPOnly = true
 	m.CookieSecure = true
 	m.CookieSameSite = http.SameSiteStrictMode
+	m.ShowDetailedPAMResult = false
 
 	d.Next()
 
@@ -363,6 +368,12 @@ func (m *PAMPlugin) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				return d.ArgErr()
 			}
 			m.CookieHTTPOnly = d.Val() == "true"
+
+		case "show_detailed_pam_result":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.ShowDetailedPAMResult = d.Val() == "true"
 
 		case "cookie_samesite":
 			if !d.NextArg() {
