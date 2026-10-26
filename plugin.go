@@ -267,11 +267,15 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 			return c.String(http.StatusOK, token)
 		} else {
-			m.logger.Warn("pam login failed", zap.String("user", req.Username), zap.String("client_ip", ip), zap.String("pam_result", err.Error()))
+			pamCode := -1
+			if pe, ok := err.(*pam.Error); ok {
+				pamCode = pe.Code
+			}
+			m.logger.Warn("pam login failed", zap.String("user", req.Username), zap.String("client_ip", ip), zap.String("pam_result", err.Error()), zap.Int("pam_code", pamCode))
 			if m.ShowDetailedPAMResult {
 				return c.String(http.StatusUnauthorized, err.Error())
 			}
-			return c.String(http.StatusUnauthorized, "authentication failed")
+			return c.String(http.StatusUnauthorized, "Authentication failure")
 		}
 	})
 

@@ -3,7 +3,6 @@ package pam
 // #include "pam.h"
 import "C"
 import (
-	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -13,36 +12,20 @@ func init() {
 }
 
 var results = map[int]string{
-	int(C.PAM_OPEN_ERR):              "PAM_OPEN_ERR",
-	int(C.PAM_SYMBOL_ERR):            "PAM_SYMBOL_ERR",
-	int(C.PAM_SERVICE_ERR):           "PAM_SERVICE_ERR",
-	int(C.PAM_SYSTEM_ERR):            "PAM_SYSTEM_ERR",
-	int(C.PAM_BUF_ERR):               "PAM_BUF_ERR",
-	int(C.PAM_PERM_DENIED):           "PAM_PERM_DENIED",
-	int(C.PAM_AUTH_ERR):              "PAM_AUTH_ERR",
-	int(C.PAM_CRED_INSUFFICIENT):     "PAM_CRED_INSUFFICIENT",
-	int(C.PAM_AUTHINFO_UNAVAIL):      "PAM_AUTHINFO_UNAVAIL",
-	int(C.PAM_USER_UNKNOWN):          "PAM_USER_UNKNOWN",
-	int(C.PAM_MAXTRIES):              "PAM_MAXTRIES",
-	int(C.PAM_NEW_AUTHTOK_REQD):      "PAM_NEW_AUTHTOK_REQD",
-	int(C.PAM_ACCT_EXPIRED):          "PAM_ACCT_EXPIRED",
-	int(C.PAM_SESSION_ERR):           "PAM_SESSION_ERR",
-	int(C.PAM_CRED_UNAVAIL):          "PAM_CRED_UNAVAIL",
-	int(C.PAM_CRED_EXPIRED):          "PAM_CRED_EXPIRED",
-	int(C.PAM_CRED_ERR):              "PAM_CRED_ERR",
-	int(C.PAM_NO_MODULE_DATA):        "PAM_NO_MODULE_DATA",
-	int(C.PAM_CONV_ERR):              "PAM_CONV_ERR",
-	int(C.PAM_AUTHTOK_ERR):           "PAM_AUTHTOK_ERR",
-	int(C.PAM_AUTHTOK_RECOVERY_ERR):  "PAM_AUTHTOK_RECOVERY_ERR",
-	int(C.PAM_AUTHTOK_LOCK_BUSY):     "PAM_AUTHTOK_LOCK_BUSY",
-	int(C.PAM_AUTHTOK_DISABLE_AGING): "PAM_AUTHTOK_DISABLE_AGING",
-	int(C.PAM_TRY_AGAIN):             "PAM_TRY_AGAIN",
-	int(C.PAM_IGNORE):                "PAM_IGNORE",
-	int(C.PAM_ABORT):                 "PAM_ABORT",
-	int(C.PAM_AUTHTOK_EXPIRED):       "PAM_AUTHTOK_EXPIRED",
-	int(C.PAM_MODULE_UNKNOWN):        "PAM_MODULE_UNKNOWN",
-	int(C.PAM_BAD_ITEM):              "PAM_BAD_ITEM",
-	int(C.PAM_CONV_AGAIN):            "PAM_CONV_AGAIN",
+	int(C.PAM_OPEN_ERR):              "System open error",
+	int(C.PAM_SYMBOL_ERR):            "System symbol error",
+	int(C.PAM_SERVICE_ERR):           "System service error",
+	int(C.PAM_SYSTEM_ERR):            "System error",
+	int(C.PAM_BUF_ERR):               "System buffer error",
+	int(C.PAM_CONV_ERR):              "Conversation error",
+	int(C.PAM_PERM_DENIED):           "Permission denied",
+	int(C.PAM_AUTH_ERR):              "Authentication failure",
+	int(C.PAM_CRED_INSUFFICIENT):     "Can not access authentication data due to insufficient credentials",
+	int(C.PAM_AUTHINFO_UNAVAIL):      "Authentication information unavailable",
+	int(C.PAM_USER_UNKNOWN):          "Unknown user",
+	int(C.PAM_MAXTRIES):              "Too many authentication attempts",
+	int(C.PAM_NEW_AUTHTOK_REQD):      "The user account is valid but the authentication token is expired",
+	int(C.PAM_ACCT_EXPIRED):          "User account has expired",
 }
 
 // Result returns the symbolic name of a PAM return code.
@@ -50,8 +33,15 @@ func Result(code int) string {
 	if name, ok := results[code]; ok {
 		return name
 	}
-	return fmt.Sprintf("PAM_UNKNOWN_ERR_%d", code)
+	return fmt.Sprintf("PAM error code: %d", code)
 }
+
+// Error is returned by Authenticate and carries the raw PAM return code.
+type Error struct {
+	Code int
+}
+
+func (e *Error) Error() string { return Result(e.Code) }
 
 func Authenticate(username string, password string) (bool, error) {
 
@@ -66,7 +56,7 @@ func Authenticate(username string, password string) (bool, error) {
 	var ok = C.authenticate_system(user, pass, &errcode)
 
 	if ok != 1 {
-		return false, errors.New(Result(int(errcode)))
+		return false, &Error{Code: int(errcode)}
 	} else {
 		return true, nil
 	}

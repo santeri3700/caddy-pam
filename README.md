@@ -271,7 +271,7 @@ The plugin logs through Caddy's logger, so entries go to stderr and from there t
 | Message                | Level | Fields                                      |
 | ---------------------- | ----- | ------------------------------------------- |
 | `pam login succeeded`  | info  | `user`, `client_ip`                         |
-| `pam login failed`     | warn  | `user`, `client_ip`, `pam_result` (PAM code name, e.g. `PAM_AUTH_ERR`)     |
+| `pam login failed`     | warn  | `user`, `client_ip`, `pam_result` (description), `pam_code` (raw PAM return code) |
 | `authorization denied` | warn  | `user`, `client_ip`, `policy`, `uri`        |
 
 `client_ip` for login events honours Caddy's `trusted_proxies`. For `authorization denied` it comes from `X-Forwarded-For`.
