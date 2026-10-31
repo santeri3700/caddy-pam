@@ -86,6 +86,12 @@ Add the `pam_auth` directive to your Caddyfile:
 pam_auth {
     base_url https://auth.example.com
     session_lifetime 12h
+    session_cookie_name __PAM_Session
+    return_cookie_name __PAM_Return_URI
+    callback_path /cdn-cgi/pam-callback
+    logout_path /cdn-cgi/pam-logout
+    return_query_param returnTo
+    denied_query_param denied
     cookie_secure true
     cookie_httponly true
     cookie_samesite strict
@@ -99,6 +105,12 @@ pam_auth {
 | ------------------ | -------- | ---------------------------------------------- |
 | `base_url`         | required | URL users are redirected to for authentication |
 | `session_lifetime` | `12h`    | Lifetime of authentication sessions            |
+| `session_cookie_name` | `__PAM_Session` | Name of the authentication session cookie |
+| `return_cookie_name` | `__PAM_Return_URI` | Name of the original-URI return cookie |
+| `callback_path` | `/cdn-cgi/pam-callback` | Path used for the authentication callback |
+| `logout_path` | `/cdn-cgi/pam-logout` | Path used to log out |
+| `return_query_param` | `returnTo` | Query parameter used to indicate the original requested URI |
+| `denied_query_param` | `denied` | Query parameter used to indicate the denied username |
 | `cookie_secure`    | `true`   | Enable the Secure cookie flag                  |
 | `cookie_httponly`  | `true`   | Enable HttpOnly cookies                        |
 | `cookie_samesite`  | `strict` | Cookie SameSite policy                         |

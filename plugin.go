@@ -35,6 +35,12 @@ type PAMPlugin struct {
 	CookieSecure          bool          `json:"cookieSecure,omitempty"`
 	CookieSameSite        http.SameSite `json:"cookieSameSite,omitempty"`
 	ShowDetailedPAMResult bool          `json:"showDetailedPamResult,omitempty"`
+	SessionCookieName     string        `json:"sessionCookieName,omitempty"`
+	ReturnCookieName      string        `json:"returnCookieName,omitempty"`
+	CallbackPath          string        `json:"callbackPath,omitempty"`
+	LogoutPath            string        `json:"logoutPath,omitempty"`
+	ReturnQueryParam      string        `json:"returnQueryParam,omitempty"`
+	DeniedQueryParam      string        `json:"deniedQueryParam,omitempty"`
 }
 
 type LoginRequest struct {
@@ -43,10 +49,12 @@ type LoginRequest struct {
 }
 
 const FALLTHROUGH_HANDLER_KEY string = "fallthroughHandler"
-const PAM_SESSION = "__PAM_Session"
-const PAM_RETURN = "__PAM_Return_URI"
-const CALLBACK_PATH = "/cdn-cgi/pam-callback"
-const LOGOUT_PATH = "/cdn-cgi/pam-logout"
+const CALLBACK_PATH_DEFAULT = "/cdn-cgi/pam-callback"
+const LOGOUT_PATH_DEFAULT = "/cdn-cgi/pam-logout"
+const RETURN_QUERY_PARAM_DEFAULT = "returnTo"
+const DENIED_QUERY_PARAM_DEFAULT = "denied"
+const SESSION_COOKIE_NAME_DEFAULT = "__PAM_Session"
+const RETURN_COOKIE_NAME_DEFAULT = "__PAM_Return_URI"
 const SESSION_LIFETIME_DEFAULT = 60 * 60 * 12
 
 func init() {
@@ -170,6 +178,24 @@ func (m *PAMPlugin) mkCookie(name string, value string, lifetime int) *http.Cook
 func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 
 	m.logger = ctx.Logger()
+	if m.SessionCookieName == "" {
+		m.SessionCookieName = SESSION_COOKIE_NAME_DEFAULT
+	}
+	if m.ReturnCookieName == "" {
+		m.ReturnCookieName = RETURN_COOKIE_NAME_DEFAULT
+	}
+	if m.CallbackPath == "" {
+		m.CallbackPath = CALLBACK_PATH_DEFAULT
+	}
+	if m.LogoutPath == "" {
+		m.LogoutPath = LOGOUT_PATH_DEFAULT
+	}
+	if m.ReturnQueryParam == "" {
+		m.ReturnQueryParam = RETURN_QUERY_PARAM_DEFAULT
+	}
+	if m.DeniedQueryParam == "" {
+		m.DeniedQueryParam = DENIED_QUERY_PARAM_DEFAULT
+	}
 
 	e := echo.New()
 	e.HideBanner = true
@@ -181,20 +207,20 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 		headers := c.Request().Header
 
 		// the session cookie lives on the protected site, so logout must be requested through it
-		if u, err := url.Parse(headers.Get("x-forwarded-uri")); err == nil && u.Path == LOGOUT_PATH {
-			c.SetCookie(m.mkCookie(PAM_SESSION, "", -1))
-			c.SetCookie(m.mkCookie(PAM_RETURN, "/", 300))
-			returnTo := fmt.Sprintf("%s://%s%s", headers.Get("x-forwarded-proto"), headers.Get("x-forwarded-host"), CALLBACK_PATH)
+		if u, err := url.Parse(headers.Get("x-forwarded-uri")); err == nil && u.Path == m.LogoutPath {
+			c.SetCookie(m.mkCookie(m.SessionCookieName, "", -1))
+			c.SetCookie(m.mkCookie(m.ReturnCookieName, "/", 300))
+			returnTo := fmt.Sprintf("%s://%s%s", headers.Get("x-forwarded-proto"), headers.Get("x-forwarded-host"), m.CallbackPath)
 			redirUrl, _ := url.Parse(m.BaseURL)
 			q := redirUrl.Query()
-			q.Add("returnTo", returnTo)
+			q.Add(m.ReturnQueryParam, returnTo)
 			redirUrl.RawQuery = q.Encode()
 			return c.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
 		}
 
 		deniedUser := ""
 
-		if cookie, err := c.Cookie(PAM_SESSION); cookie != nil && err == nil {
+		if cookie, err := c.Cookie(m.SessionCookieName); cookie != nil && err == nil {
 			if username, err := m.confirmJwt(cookie.Value); err == nil {
 				if isAllowed(username, headers.Get("PAM-Allow")) {
 					c.Response().Header().Add("x-pam-user", username)
@@ -212,26 +238,26 @@ func (m *PAMPlugin) Provision(ctx caddy.Context) error {
 		))
 
 		// if this is the login callback set the session cookie to the callback value and restore orignal uri
-		if orig.Path == CALLBACK_PATH && orig.Query().Get("token") != "" {
-			if cookie, err := c.Cookie(PAM_RETURN); err == nil && cookie != nil {
+		if orig.Path == m.CallbackPath && orig.Query().Get("token") != "" {
+			if cookie, err := c.Cookie(m.ReturnCookieName); err == nil && cookie != nil {
 				to := cookie.Value
-				c.SetCookie(m.mkCookie(PAM_RETURN, "", -1))
-				c.SetCookie(m.mkCookie(PAM_SESSION, orig.Query().Get("token"), int(m.SessionLifetime.Seconds())))
+				c.SetCookie(m.mkCookie(m.ReturnCookieName, "", -1))
+				c.SetCookie(m.mkCookie(m.SessionCookieName, orig.Query().Get("token"), int(m.SessionLifetime.Seconds())))
 				return c.Redirect(http.StatusTemporaryRedirect, to)
 			}
 		}
 
 		// else store the original uri in a cookie and redirect to the sso service
-		c.SetCookie(m.mkCookie(PAM_RETURN, headers.Get("x-forwarded-uri"), 300))
-		returnTo := fmt.Sprintf("%s://%s%s", headers.Get("x-forwarded-proto"), headers.Get("x-forwarded-host"), CALLBACK_PATH)
+		c.SetCookie(m.mkCookie(m.ReturnCookieName, headers.Get("x-forwarded-uri"), 300))
+		returnTo := fmt.Sprintf("%s://%s%s", headers.Get("x-forwarded-proto"), headers.Get("x-forwarded-host"), m.CallbackPath)
 
 		redirUrl, _ := url.Parse(m.BaseURL)
 		q := redirUrl.Query()
 		orig.RawQuery = ""
-		q.Add("returnTo", returnTo)
+		q.Add(m.ReturnQueryParam, returnTo)
 		if deniedUser != "" {
 			m.logger.Warn("authorization denied", zap.String("user", deniedUser), zap.String("client_ip", headers.Get("X-Forwarded-For")), zap.String("policy", headers.Get("PAM-Allow")), zap.String("uri", headers.Get("x-forwarded-uri")))
-			q.Add("denied", deniedUser)
+			q.Add(m.DeniedQueryParam, deniedUser)
 		}
 		redirUrl.RawQuery = q.Encode()
 
@@ -333,6 +359,12 @@ func (m *PAMPlugin) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	m.CookieSecure = true
 	m.CookieSameSite = http.SameSiteStrictMode
 	m.ShowDetailedPAMResult = false
+	m.SessionCookieName = SESSION_COOKIE_NAME_DEFAULT
+	m.ReturnCookieName = RETURN_COOKIE_NAME_DEFAULT
+	m.CallbackPath = CALLBACK_PATH_DEFAULT
+	m.LogoutPath = LOGOUT_PATH_DEFAULT
+	m.ReturnQueryParam = RETURN_QUERY_PARAM_DEFAULT
+	m.DeniedQueryParam = DENIED_QUERY_PARAM_DEFAULT
 
 	d.Next()
 
@@ -349,6 +381,30 @@ func (m *PAMPlugin) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			}
 
 			m.BaseURL = d.Val()
+
+		case "session_cookie_name":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.SessionCookieName = d.Val()
+
+		case "return_cookie_name":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.ReturnCookieName = d.Val()
+
+		case "callback_path":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.CallbackPath = d.Val()
+
+		case "logout_path":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.LogoutPath = d.Val()
 
 		case "session_lifetime":
 			if !d.NextArg() {
@@ -393,6 +449,24 @@ func (m *PAMPlugin) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			default:
 				m.CookieSameSite = http.SameSiteDefaultMode
 			}
+
+		case "return_query_param":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			if strings.ContainsAny(d.Val(), "?&") {
+				return d.Errf("return_query_param must not contain ? or &")
+			}
+			m.ReturnQueryParam = d.Val()
+
+		case "denied_query_param":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			if strings.ContainsAny(d.Val(), "?&") {
+				return d.Errf("denied_query_param must not contain ? or &")
+			}
+			m.DeniedQueryParam = d.Val()
 
 		default:
 			return d.Errf("unknown subdirective %q", d.Val())
