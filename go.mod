@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	github.com/caddyserver/caddy/v2 v2.11.4
 	github.com/labstack/echo/v4 v4.15.4
+	golang.org/x/net v0.56.0
 )
 
 require (
@@ -158,7 +159,6 @@ require (
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20260213171211-a408498e5541 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect

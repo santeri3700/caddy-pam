@@ -43,28 +43,73 @@ static inline void initialize() {
 	);
 }
 
+struct conversation_data {
+	const char* username;
+	const char* password;
+};
+
+static inline void free_responses(struct pam_response* responses, int count) {
+	if (responses == NULL) return;
+	for (int i = 0; i < count; i++) free(responses[i].resp);
+	free(responses);
+}
+
 static inline int function_conversation(int num_msg, const struct pam_message** msg, struct pam_response** resp, void* appdata_ptr) {
-	*resp = (struct pam_response*)appdata_ptr;
+	if (num_msg <= 0 || num_msg > 64 || msg == NULL || resp == NULL || appdata_ptr == NULL) return PAM_CONV_ERR;
+	*resp = NULL;
+
+	const struct conversation_data* credentials = (const struct conversation_data*)appdata_ptr;
+	struct pam_response* responses = (struct pam_response*)calloc((size_t)num_msg, sizeof(struct pam_response));
+	if (responses == NULL) return PAM_BUF_ERR;
+
+	for (int i = 0; i < num_msg; i++) {
+		if (msg[i] == NULL) {
+			free_responses(responses, num_msg);
+			return PAM_CONV_ERR;
+		}
+
+		const char* answer = NULL;
+		switch (msg[i]->msg_style) {
+		case PAM_PROMPT_ECHO_OFF:
+			answer = credentials->password;
+			break;
+		case PAM_PROMPT_ECHO_ON:
+			answer = credentials->username;
+			break;
+		case PAM_TEXT_INFO:
+		case PAM_ERROR_MSG:
+			continue;
+		default:
+			free_responses(responses, num_msg);
+			return PAM_CONV_ERR;
+		}
+
+		responses[i].resp = strdup(answer);
+		if (responses[i].resp == NULL) {
+			free_responses(responses, num_msg);
+			return PAM_BUF_ERR;
+		}
+	}
+
+	*resp = responses;
 	return PAM_SUCCESS;
 }
 
-#define TRY(call) do { if((*retval = call) != PAM_SUCCESS) return 0; } while(0)
-
-// this is pretty cursed
 static inline int authenticate_system(const char* username, const char* password, int* retval)
 {
-	struct pam_response* reply = (struct pam_response*) malloc(sizeof(struct pam_response));
-	const struct pam_conv local_conversation = { function_conversation, reply };
+	const struct conversation_data credentials = { username, password };
+	const struct pam_conv local_conversation = { function_conversation, (void*)&credentials };
 	pam_handle_t* local_auth_handle = NULL;
+	int status = pam_start("login", username, &local_conversation, &local_auth_handle);
 
-	TRY(pam_start("login", username, &local_conversation, &local_auth_handle));
+	if (status == PAM_SUCCESS && local_auth_handle == NULL) status = PAM_SYSTEM_ERR;
+	if (status == PAM_SUCCESS) status = pam_authenticate(local_auth_handle, 0);
+	if (status == PAM_SUCCESS) status = pam_acct_mgmt(local_auth_handle, PAM_DISALLOW_NULL_AUTHTOK);
+	if (local_auth_handle != NULL) {
+		int end_status = pam_end(local_auth_handle, status);
+		if (status == PAM_SUCCESS) status = end_status;
+	}
 
-	reply->resp = strdup(password);
-	reply->resp_retcode = 0;
-
-	TRY(pam_authenticate(local_auth_handle, 0));
-	TRY(pam_acct_mgmt(local_auth_handle, PAM_DISALLOW_NULL_AUTHTOK));
-	TRY(pam_end(local_auth_handle, *retval));
-
-	return 1;
+	*retval = status;
+	return status == PAM_SUCCESS;
 }

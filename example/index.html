@@ -283,7 +283,7 @@
 
 <script>
     const params = new URLSearchParams(window.location.search);
-    const returnTo = params.get("returnTo");
+    const loginState = params.get("returnTo");
 
     const deniedUser = params.get("denied");
 
@@ -292,12 +292,20 @@
         deniedBox.textContent = `You are signed in as "${deniedUser}" but do not have permission to access this site. Sign in with a different account to continue.`;
         deniedBox.style.display = "block";
 
-        if (returnTo) {
-            const logoutLink = document.createElement("a");
-            logoutLink.href = new URL("/cdn-cgi/pam-logout", returnTo).toString();
-            logoutLink.textContent = "Sign out";
-            logoutLink.style.cssText = "display:block;margin-top:.5rem;color:inherit;text-decoration:underline";
-            deniedBox.appendChild(logoutLink);
+        if (loginState) {
+            fetch(`/login-flow?state=${encodeURIComponent(loginState)}`)
+                .then((response) => response.ok ? response.json() : null)
+                .then((flow) => {
+                    if (!flow) {
+                        return;
+                    }
+                    const logoutLink = document.createElement("a");
+                    logoutLink.href = new URL("/cdn-cgi/pam-logout", flow.callbackURL).toString();
+                    logoutLink.textContent = "Sign out";
+                    logoutLink.style.cssText = "display:block;margin-top:.5rem;color:inherit;text-decoration:underline";
+                    deniedBox.appendChild(logoutLink);
+                })
+                .catch(() => {});
         }
     }
 
@@ -327,6 +335,10 @@
 
 
         try {
+            if (!loginState) {
+                throw new Error("Login flow expired. Reload the protected page to try again.");
+            }
+
             const response = await fetch("/login", {
                 method: "POST",
                 headers: {
@@ -334,7 +346,8 @@
                 },
                 body: new URLSearchParams({
                     username,
-                    password
+                    password,
+                    state: loginState
                 })
             });
 
@@ -344,16 +357,9 @@
             }
 
 
-            const token = await response.text();
-
-
-            if (!returnTo) {
-                throw new Error("Missing returnTo parameter");
-            }
-
-
-            const redirect = new URL(returnTo);
-            redirect.searchParams.set("token", token);
+            const flow = await response.json();
+            const redirect = new URL(flow.callbackURL);
+            redirect.searchParams.set("state", flow.state);
 
             window.location.href = redirect.toString();
 

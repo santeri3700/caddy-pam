@@ -85,6 +85,7 @@ Add the `pam_auth` directive to your Caddyfile:
 ```caddyfile
 pam_auth {
     base_url https://auth.example.com
+    allowed_return_origins https://app.example.com
     session_lifetime 12h
     session_cookie_name __PAM_Session
     return_cookie_name __PAM_Return_URI
@@ -104,12 +105,13 @@ pam_auth {
 | Option             | Default  | Description                                    |
 | ------------------ | -------- | ---------------------------------------------- |
 | `base_url`         | required | URL users are redirected to for authentication |
+| `allowed_return_origins` | required | Exact callback origins or one-label subdomain patterns |
 | `session_lifetime` | `12h`    | Lifetime of authentication sessions            |
 | `session_cookie_name` | `__PAM_Session` | Name of the authentication session cookie |
-| `return_cookie_name` | `__PAM_Return_URI` | Name of the original-URI return cookie |
+| `return_cookie_name` | `__PAM_Return_URI` | Name of the short-lived login-flow cookie |
 | `callback_path` | `/cdn-cgi/pam-callback` | Path used for the authentication callback |
 | `logout_path` | `/cdn-cgi/pam-logout` | Path used to log out |
-| `return_query_param` | `returnTo` | Query parameter used to indicate the original requested URI |
+| `return_query_param` | `returnTo` | Query parameter used to carry the opaque login-flow state |
 | `denied_query_param` | `denied` | Query parameter used to indicate the denied username |
 | `cookie_secure`    | `true`   | Enable the Secure cookie flag                  |
 | `cookie_httponly`  | `true`   | Enable HttpOnly cookies                        |
@@ -121,6 +123,16 @@ Supported SameSite values:
 * `strict`
 * `lax`
 * `none`
+
+`allowed_return_origins` must cover every protected site origin that uses this authentication service. Exact origins are supported, along with a leading `*.` for one subdomain label:
+
+```caddyfile
+allowed_return_origins https://app.example.com https://*.example.net
+```
+
+The wildcard matches `https://team.example.net`, but not `https://example.net` or `https://team.dev.example.net`. Scheme and port must match. Wildcards are accepted for registrable domains and for unlisted single-label private TLDs such as `https://*.lastname` or `https://*.foobar`. The reserved `https://*.home.arpa` namespace is also supported. Other known public suffixes such as `https://*.com`, `https://*.co.uk`, and `https://*.github.io` are rejected. Paths, ports-as-wildcards, and wildcards anywhere other than the complete leftmost host label are not supported.
+
+**Security risk:** every matching subdomain becomes a trusted callback origin. Only use a wildcard when you control and protect all matching subdomains; avoid domains where users or third parties can create subdomains, and remove stale DNS records to prevent subdomain takeover. Prefer exact origins when practical.
 
 ## Authentication flow
 
@@ -144,14 +156,17 @@ The flow:
 1. A user requests a protected resource.
 2. Caddy calls `/authenticate`.
 3. The plugin checks the session cookie.
-4. If no valid session exists, the user is redirected to the authentication service.
+4. If no valid session exists, the user is redirected to the authentication service with a short-lived opaque flow state.
    If the session is valid but the `PAM-Allow` policy rejects the user, the redirect also carries a `denied=<username>` query parameter.
 5. The user submits credentials through the login page.
 6. Credentials are validated through PAM.
-7. A signed JWT session is issued.
-8. The original request continues.
+7. The signed JWT is kept server-side; the browser returns to the allowlisted callback with the opaque state, not the JWT.
+8. The callback verifies the state cookie, callback origin, and one-time flow before setting the session cookie.
+9. The original request continues.
 
-> **Note:** `caddy-pam` does not provide a built-in login page. The user-facing authentication UI is intentionally left to the operator. A minimal example login page is included in `examples/index.html` and can be used as a starting point or customized for your environment. The example shows a permission warning, with a sign-out link, when the `denied` parameter is present.
+> **Note:** `caddy-pam` does not provide a built-in login page. The user-facing authentication UI is intentionally left to the operator. A minimal example login page is included in `example/index.html` and can be used as a starting point or customized for your environment. A custom page must submit the `returnTo` state with credentials, then navigate to the returned `callbackURL` with the returned `state`. Do not put the JWT in a URL. The example shows a permission warning, with a sign-out link, when the `denied` parameter is present.
+
+Login flow state is held in process memory for five minutes. Requests in a flow must reach the same authentication-service instance; multi-instance deployments need session affinity or shared flow storage. The signing key is also process-local, so session validation already requires a consistent instance or a shared-key design.
 
 ## Access control
 
@@ -205,6 +220,7 @@ Example:
 auth.example.com {
     pam_auth {
         base_url https://auth.example.com
+        allowed_return_origins https://app.example.com
         session_lifetime 1h
     }
 
